@@ -1,15 +1,20 @@
 import compiler.ast as ast
 from compiler.types import Int, Type, Bool, Unit, FunType
 from compiler.ast import *
+from typing import Generic, TypeVar
 
+T = TypeVar('T')
 
 @dataclass
-class SymTab:
+class SymTab(Generic[T]):
     """This is supposed to map variable names to types"""
-    mapping: dict
+    mapping: dict[str, T]
 
-    def map(self, variable_name: str) -> FunType:
+    def map(self, variable_name: str) -> T:
         return self.mapping[variable_name]
+    
+    def add_local(self, variable_name: str, variable: T) -> None:
+        self.mapping[variable_name] = variable
 
 
 # Missing currently: ==, != and = (handled as special cases)
@@ -23,7 +28,10 @@ type_mappings = {'+': FunType([Int(), Int()], Int()),
                  '>=': FunType([Int(), Int()], Bool()),
                  '<=': FunType([Int(), Int()], Bool()),
                  'and': FunType([Bool(), Bool()], Bool()),
-                 'or': FunType([Bool(), Bool()], Bool())
+                 'or': FunType([Bool(), Bool()], Bool()),
+                 'print_int': FunType([Int()], Unit()),
+                 'print_bool': FunType([Bool()], Unit()),
+                 'read_int': FunType([], Int()),
                 }
 
 def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:

@@ -46,7 +46,7 @@ def parse(tokens: list[Token]) -> ast.Expression:
         if peek().type != 'int_literal':
             raise Exception(f'{peek().loc}: expected an integer literal')
         token = consume()
-        return ast.Literal(value=int(token.text), location=token.loc)
+        return ast.Literal(value=int(token.text), location=token.loc, type=Int())
     
     def parse_identifier() -> ast.Identifier: 
         if peek().type != 'identifier':
@@ -72,6 +72,23 @@ def parse(tokens: list[Token]) -> ast.Expression:
             return ast.BinaryOp(left=left, op=operator, right=right, location=left.location)
         return left
     
+    #def parse_expression_left(allow_var: bool) -> ast.Expression:
+    #    left_associative_binary_operators = [
+    #        ['or'],
+    #        ['and'],
+    #        ['==', '!='],
+    #        ['<', '<=', '>', '>='],
+    #        ['+', '-'],
+    #        ['*', '/', '%'],
+    #    ]
+    #    left = parse_factor(allow_var)
+    #    for i, operators in enumerate(left_associative_binary_operators):
+    #        while peek().text in operators:
+    #            operator_token = consume()
+    #            operator = operator_token.text
+    #            right = parse_factor(allow_var=False)
+    #            left = ast.BinaryOp(left=left, op=operator, right=right, location=left.location)
+    #    return left
     def parse_expression_left(allow_var: bool) -> ast.Expression:
         left_associative_binary_operators = [
             ['or'],
@@ -81,14 +98,25 @@ def parse(tokens: list[Token]) -> ast.Expression:
             ['+', '-'],
             ['*', '/', '%'],
         ]
-        left = parse_factor(allow_var)
-        for i, operators in enumerate(left_associative_binary_operators):
-            while peek().text in operators:
+        
+        first_factor = True
+        
+        def parse_level(level: int) -> ast.Expression:
+            nonlocal first_factor
+            if level >= len(left_associative_binary_operators):
+                use_allow_var = allow_var and first_factor
+                first_factor = False
+                return parse_factor(use_allow_var)
+            
+            left = parse_level(level + 1)
+            while peek().text in left_associative_binary_operators[level]:
                 operator_token = consume()
                 operator = operator_token.text
-                right = parse_factor(allow_var=False)
+                right = parse_level(level + 1)
                 left = ast.BinaryOp(left=left, op=operator, right=right, location=left.location)
-        return left
+            return left
+        
+        return parse_level(0)
 
     def parse_factor(allow_var: bool = False) -> ast.Expression:
         operators = ['or', 'and', '==', '!=', '<', '<=', '>', '>=', '+', '*', '/', '%']
