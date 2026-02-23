@@ -38,6 +38,11 @@ class Label(Instruction):
     name: str
     
 @dataclass(frozen=True)
+class Label(Instruction):
+    """Marks the destination of a jump instruction."""
+    name: str
+    
+@dataclass(frozen=True)
 class LoadBoolConst(Instruction):
     """Loads a boolean constant value to `dest`."""
     value: bool
