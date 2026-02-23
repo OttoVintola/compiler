@@ -65,7 +65,7 @@ def generate_assembly(instructions: list[ir.Instruction]) -> str:
     emit('.type main, @function')
     emit('.section .text')
 
-    emit('.main')
+    emit('main:')
     emit(f'pushq %rbp')
     emit(f'movq %rsp, %rbp')
 
@@ -111,11 +111,17 @@ def generate_assembly(instructions: list[ir.Instruction]) -> str:
                 emit(f'jmp .L{insn.else_label.name}')
 
             case ir.Call():
-                arg_registers = [locals.get_ref(ir_var) for ir_var in insn.args]
-
-                intrinsics.all_intrinsics[insn.fun.name](intrinsics.IntrinsicArgs(arg_refs=arg_registers, 
-                                                                                  result_register=f'%rax',
-                                                                                  emit=emit))
+                if insn.fun.name in intrinsics.all_intrinsics:
+                    arg_registers = [locals.get_ref(ir_var) for ir_var in insn.args]
+                    intrinsics.all_intrinsics[insn.fun.name](intrinsics.IntrinsicArgs(arg_refs=arg_registers, 
+                                                                                      result_register=f'%rax',
+                                                                                      emit=emit))
+                else:
+                    # External function call
+                    if len(insn.args) > 0:
+                        emit(f'movq {locals.get_ref(insn.args[0])}, %rdi')
+                    emit(f'call {insn.fun.name}')
+                    emit(f'movq %rax, {locals.get_ref(insn.dest)}')
             
             
                 
@@ -125,4 +131,4 @@ def generate_assembly(instructions: list[ir.Instruction]) -> str:
     emit(f'popq %rbp')
     emit('ret')
 
-    return '\n'.join(lines)
+    return '\n'.join(lines) + '\n'

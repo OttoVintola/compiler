@@ -26,5 +26,5 @@ def test_ir_generator() -> None:
         root_expr=root_expr
     )
 
-    for instr in ir_list:
-        print(instr)
+    #for instr in ir_list:
+        #print(instr)
