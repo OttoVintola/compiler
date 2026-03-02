@@ -9,6 +9,7 @@ T = TypeVar('T')
 class SymTab(Generic[T]):
     """This is supposed to map variable names to types"""
     mapping: dict[str, T]
+    current_return_type: Type | None = None
 
     def map(self, variable_name: str) -> T:
         return self.mapping[variable_name]
@@ -32,6 +33,10 @@ type_mappings = {'+': FunType([Int(), Int()], Int()),
                  'print_int': FunType([Int()], Unit()),
                  'print_bool': FunType([Bool()], Unit()),
                  'read_int': FunType([], Int()),
+                 '=': FunType([Unit(), Unit()], Unit()),
+                 '==': FunType([Unit(), Unit()], Bool()),
+                 '!=': FunType([Unit(), Unit()], Bool()),
+                 'not': FunType([Bool()], Bool())
                 }
 
 def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
@@ -46,23 +51,31 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
             if not isinstance(func_type, FunType): raise Exception(f'Got {func_type}, not FunType in type checking a BinaryOp')
 
             p1, p2 = func_type.params[0], func_type.params[1]
-            if p1 != p2: raise Exception(f'Operator {node.op} expects {func_type.params}, got {p1} and {p2}')
- 
+            if t1 != p1 or t2 != p2: raise Exception(f'Operator {node.op} expects {func_type.params}, got {t1} and {t2}')
+            node.type = func_type.return_type
             return func_type.return_type
-        case ast.BinaryOp() if node.op in ['==', '!=']:
+        case ast.BinaryOp() if node.op in ['==', '!=', 'or', 'and']:
             t1 = typecheck_node(node.left, symtab)
             t2 = typecheck_node(node.right, symtab)
 
             if type(t1) != type(t2): raise Exception(f'Expected two of the same type, got {t1} and {t2}')
+            node.type = Bool()
             return Bool()
         
         case ast.BinaryOp() if node.op == '=':
             t1 = typecheck_node(node.left, symtab)
-            t2 = typecheck_node(node.right, symtab)
+            typecheck_node(node.right, symtab)
+            # For chained assignment (a = b = c), find the innermost assigned value's type.
+            rhs = node.right
+            while isinstance(rhs, ast.BinaryOp) and rhs.op == '=':
+                rhs = rhs.right
+            t_value = rhs.type
             if isinstance(node.left, Identifier):
-                symtab.mapping[node.left.name] = t2
+                symtab.mapping[node.left.name] = t_value
 
-            if t1 != t2: raise Exception(f'Assignment requires both sides to have the same types, got {t1} and {t2}')
+            if t1 != t_value: raise Exception(f'Assignment requires both sides to have the same types, got {t1} and {t_value}')
+            
+            node.type = Unit()
             return Unit()
         case ast.IfStatement():
             t1 = typecheck_node(node.first_expr, symtab)
@@ -75,15 +88,21 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
                     raise Exception(f"Was expecting the 2nd and 3rd expressions to have same types but got {t2} and {t3}")
             return t2
         case ast.Literal():
+            result: Type
             if type(node.value) is bool:
-                return Bool()
-            if type(node.value) is int:
-                return Int()
-            if node.value is None:
+                result = Bool()
+            elif type(node.value) is int:
+                result = Int()
+            elif node.value is None:
                 return Unit()
-            raise Exception(f'Unknown literal type {type(node.value)}')
+            else: 
+                raise Exception(f'Unknown literal type {type(node.value)}')
+            node.type = result
+            return result
         case ast.VariableDeclaration():
             tExpr = typecheck_node(node.expression, symtab)
+            if node.ID.name in symtab.mapping:
+                raise Exception(f'Variable {node.ID.name} already declared in this scope')
             symtab.mapping[node.ID.name] = tExpr
             if node.var_type is not None and tExpr != node.var_type:
                 raise Exception(f'Variable declaration type mismatch: declared {node.var_type}, got {tExpr}')
@@ -114,12 +133,55 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
         case ast.Identifier():
             if node.name not in symtab.mapping:
                 raise Exception(f'Undefined identifier {node.name}')
-            return symtab.map(node.name)
+            node.type = symtab.map(node.name)
+            return node.type
         case ast.Block():
-            result_type: Type = Unit()
+            # Create a new scope for the block
+            block_symtab = SymTab(mapping=symtab.mapping.copy(), current_return_type=symtab.current_return_type)
             for expr in node.expressions:
-                result_type = typecheck_node(expr, symtab)
+                typecheck_node(expr, block_symtab)
+                
+            if node.result_expression is not None:
+                result_type = typecheck_node(node.result_expression, block_symtab)
+            else:
+                result_type = Unit()
+            node.type = result_type
             return result_type
+        
+        case ast.Break():
+            node.type = Unit()
+            return Unit()
+        
+        case ast.Continue():
+            node.type = Unit()
+            return Unit()
+        
+        case ast.FunctionDefinition():
+            param_types = [param_type for _, param_type in node.params]
+            func_type = FunType(params=param_types, return_type=node.return_type)
+            
+            if node.name.name in symtab.mapping:
+                raise Exception(f'Function {node.name.name} already declared in this scope')
+            symtab.mapping[node.name.name] = func_type
+            
+            func_symtab = SymTab(mapping=symtab.mapping.copy(), current_return_type=node.return_type)
+            
+            for param_name, param_type in node.params:
+                func_symtab.mapping[param_name.name] = param_type
+            
+            typecheck_node(node.body, func_symtab)
+            
+            node.type = Unit()
+            return Unit()
+        
+        case ast.Return():
+            value_type = typecheck_node(node.value, symtab)
+            if symtab.current_return_type is None:
+                raise Exception(f'Return statement outside of function')
+            if value_type != symtab.current_return_type:
+                raise Exception(f'Return type mismatch: expected {symtab.current_return_type}, got {value_type}')
+            node.type = value_type
+            return value_type
         
         case _:
             raise Exception(f'Unknown AST node {node}')

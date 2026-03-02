@@ -1,8 +1,17 @@
 from compiler.type_checker import SymTab, type_mappings
-from compiler.types import Bool, Int, Unit
-from compiler.ir import IRVar, Call, Label, Instruction, Jump
+from compiler.types import Bool, Int, Unit, FunType
+from compiler.ir import IRVar, Call, Label, Instruction, Jump, Copy
 from compiler.tokenizer import L
 from compiler import ast, ir
+
+class BreakException(Exception):
+    pass
+
+class ContinueException(Exception):
+    pass
+
+# Global list to store function definitions
+_function_definitions: list[ast.FunctionDefinition] = []
 
 def generate_ir(
     # 'reserved_names' should contain all global names
@@ -21,12 +30,19 @@ def generate_ir(
         variable_counter += 1
         return IRVar(name=f'x{variable_counter}')
     
+    label_counter = 0
     def new_label(name: str) -> Label:
-        return Label(location=L, name=name)
+        nonlocal label_counter
+        label_counter += 1
+        return Label(location=L, name=f'{name}_{label_counter}')
 
     # We collect the IR instructions that we generate
     # into this list.
     ins: list[ir.Instruction] = []
+
+    # Track the current innermost loop's labels for break/continue
+    # (start_label, end_label) or None if not inside a loop
+    current_loop_labels: tuple[Label, Label] | None = None
 
     # This function visits an AST node,
     # appends IR instructions to 'ins',
@@ -38,6 +54,7 @@ def generate_ir(
     # The symbol table will be updated in the same way as
     # in the interpreter and type checker.
     def visit(st: SymTab[IRVar], expr: ast.Expression) -> IRVar:
+        nonlocal current_loop_labels
         loc = expr.location
         match expr:
             case ast.Literal():
@@ -110,6 +127,13 @@ def generate_ir(
                 ins.append(l_end)
                 return var_result                
 
+            case ast.BinaryOp() if expr.op == '=':
+                assert isinstance(expr.left, ast.Identifier), "LHS of assignment must be an identifier"
+                var_dest = st.map(expr.left.name)
+                var_src = visit(st, expr.right)
+                ins.append(ir.Copy(loc, var_src, var_dest))
+                return var_src
+
             case ast.BinaryOp():
                 # Ask the symbol table to return the variable that refers
                 # to the operator to call.
@@ -142,7 +166,11 @@ def generate_ir(
                     # the "then" branch.
                     ins.append(l_then)
                     # Recursively emit instructions for the "then" branch.
-                    visit(st, expr.the_then)
+                    try:
+                        visit(st, expr.second_expr)
+                    except (BreakException, ContinueException):
+                        ins.append(l_end)
+                        raise
  
                     # Emit the label that we jump to
                     # when we don't want to go to the "then" branch.
@@ -156,21 +184,36 @@ def generate_ir(
                     l_then = new_label("then")
                     l_end = new_label("if_end")
                     l_else = new_label("else")
+                    # Create a single result variable that both branches will write to
+                    var_result = new_var()
 
                     first_cond = visit(st, expr.first_expr)
                     ins.append(ir.CondJump(loc, first_cond, l_then, l_else))
 
                     ins.append(l_then)
-                    visit(st, expr.second_expr)
-                    ins.append(Jump(location=loc, label=l_end))
+                    pending_exception: BreakException | ContinueException | None = None
+                    try:
+                        var_then = visit(st, expr.second_expr)
+                        ins.append(ir.Copy(loc, var_then, var_result))
+                        ins.append(Jump(location=loc, label=l_end))
+                    except (BreakException, ContinueException) as exc:
+                        pending_exception = exc
                     
                     ins.append(l_else)
                     if expr.third_expr is not None:
-                        visit(st, expr.third_expr)
-                    
-                    ins.append(l_end)
+                        try:
+                            var_else = visit(st, expr.third_expr)
+                            ins.append(ir.Copy(loc, var_else, var_result))
+                        except (BreakException, ContinueException):
+                            ins.append(l_end)
+                            raise
 
-                    return var_unit
+                    ins.append(l_end)
+                    
+                    if pending_exception is not None:
+                        raise pending_exception
+
+                    return var_result
             case ast.FunctionCall():
                 # Look up the IR variable that corresponds to
                 # the function name.
@@ -184,33 +227,64 @@ def generate_ir(
                     loc, var_fun, var_args, var_result))
                 return var_result
             case ast.WhileStatement():
+                old_loop_labels = current_loop_labels
+                
                 l_start = new_label("while_start")
                 l_body = new_label("while_body")
                 l_end = new_label("while_end")
+                current_loop_labels = (l_start, l_end)
 
                 ins.append(l_start)
                 var_cond = visit(st, expr.condition_expr)
                 ins.append(ir.CondJump(loc, var_cond, l_body, l_end))
 
                 ins.append(l_body)
-                visit(st, expr.body_expr)
+                try:
+                    visit(st, expr.body_expr)
+                except BreakException:
+                    pass
+                except ContinueException:
+                    pass
                 ins.append(Jump(location=loc, label=l_start))
                 ins.append(l_end)
+                current_loop_labels = old_loop_labels
 
                 return var_unit
             
             case ast.Block():
                 new_symtab_for_block = SymTab[IRVar](mapping=st.mapping.copy())
+
+                block_pending_exception: BreakException | ContinueException | None = None
+
                 for e in expr.expressions:
-                    visit(new_symtab_for_block, e)
-                return visit(new_symtab_for_block, expr.result_expression)
+                    if e is not expr.result_expression:
+                        if block_pending_exception is None:
+                            try:
+                                visit(new_symtab_for_block, e)
+                            except (BreakException, ContinueException) as exc:
+                                block_pending_exception = exc
+                        else:
+                            try:
+                                visit(new_symtab_for_block, e)
+                            except (BreakException, ContinueException):
+                                pass
+                
+                if block_pending_exception is None:
+                    return visit(new_symtab_for_block, expr.result_expression)
+                else:
+                    try:
+                        visit(new_symtab_for_block, expr.result_expression)
+                    except (BreakException, ContinueException):
+                        pass
+                    raise block_pending_exception
             case ast.VariableDeclaration():
                 var_value = visit(st, expr.expression)
                 if not isinstance(expr.ID, ast.Identifier):
                     raise Exception(f"{loc}: expected variable name to be an identifier")
                 var_name = expr.ID.name
-                st.add_local(var_name, var_value)
-                ins.append(ir.Copy(loc, var_value, new_var()))
+                var_new = new_var()
+                ins.append(ir.Copy(loc, var_value, var_new))
+                st.add_local(var_name, var_new)
                 return var_unit
             case ast.UnaryOperator():
                 var = visit(st, expr.right)
@@ -224,9 +298,32 @@ def generate_ir(
                     raise Exception(f"{loc}: unsupported unary operator: {expr.op}")
                 return var_result
 
+            case ast.Break():
+                if current_loop_labels is None:
+                    raise Exception(f"{loc}: break outside of loop")
+                l_start, l_end = current_loop_labels
+                ins.append(ir.Jump(loc, l_end))
+                raise BreakException()
+
+            case ast.Continue():
+                if current_loop_labels is None:
+                    raise Exception(f"{loc}: continue outside of loop")
+                l_start, l_end = current_loop_labels
+                ins.append(ir.Jump(loc, l_start))
+                raise ContinueException()
+            
+            case ast.FunctionDefinition():
+                st.add_local(expr.name.name, IRVar(expr.name.name))
+                _function_definitions.append(expr)
+                return var_unit
+            
+            case ast.Return():
+                var_value = visit(st, expr.value)
+                ins.append(ir.Return(loc, var_value))
+                return var_value
             
             #... # Other AST node cases (see below)
-            # Hacky fix to run the test
+            # Hacky fix to run the tests
             case _:
                 return var_unit
 
@@ -236,6 +333,9 @@ def generate_ir(
     # actual implementations for these globals. For now,
     # they just need to exist so the variable lookups work,
     # and clashing variable names can be avoided.
+    
+    _function_definitions: list[ast.FunctionDefinition] = []
+    
     empty_dict: dict[str, IRVar] = {}
     root_symtab = SymTab[IRVar](mapping=empty_dict)
     for name in reserved_names:
@@ -252,6 +352,22 @@ def generate_ir(
     elif root_expr.type == Bool():
         # ... # Emit a call to 'print_bool'
         ins.append(Call(location=L, fun=IRVar("print_bool"), args=[var_final_result], dest=new_var()))
+
+    for func_def in _function_definitions:
+        func_symtab = SymTab[IRVar](mapping=root_symtab.mapping.copy())
+        
+        func_symtab.add_local(func_def.name.name, IRVar(func_def.name.name))
+        
+        param_vars: list[IRVar] = []
+        for param_name, param_type in func_def.params:
+            # param type is not needed
+            param_var = new_var()
+            param_vars.append(param_var)
+            func_symtab.add_local(param_name.name, param_var)
+        
+        ins.append(ir.FunctionStart(L, func_def.name.name, param_vars))
+        visit(func_symtab, func_def.body)
+        ins.append(ir.FunctionEnd(L, func_def.name.name))
 
     return ins
 

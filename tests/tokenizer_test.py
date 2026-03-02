@@ -33,3 +33,18 @@ def test_tokenizer_basics() -> None:
         Token(loc=L, type="identifier", text="x"),
         Token(loc=L, type="punctuation", text="}"),
     ]
+
+    assert tokenize(""" # this comment is at the very start of the source code
+                        123""") == [
+        Token(loc=L, type="int_literal", text="123"),
+    ]
+
+    assert tokenize("""123 # this comment is at the end of the source code""") == [
+        Token(loc=L, type="int_literal", text="123"),
+    ]
+
+    assert tokenize("""123 
+                        // hello
+                        """) == [
+        Token(loc=L, type="int_literal", text="123"),
+    ]

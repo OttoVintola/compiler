@@ -134,6 +134,18 @@ def parse(tokens: list[Token]) -> ast.Expression:
             return parse_unary()
         elif peek().text == 'while':
             return parse_while_statement()
+        elif peek().text == 'break':
+            token = consume('break')
+            return ast.Break(location=token.loc)
+        elif peek().text == 'continue':
+            token = consume('continue')
+            return ast.Continue(location=token.loc)
+        elif peek().text == 'return':
+            token = consume('return')
+            value = parse_expression(allow_var=False)
+            return ast.Return(value=value, location=token.loc)
+        elif peek().text == 'fun':
+            return parse_function_definition()
         elif peek().type == 'identifier' and peek().text not in ['true', 'false'] and peek().text != 'var':
             identifier = parse_identifier()
 
@@ -157,11 +169,11 @@ def parse(tokens: list[Token]) -> ast.Expression:
                 raise Exception(f'{peek().loc}: variable declarations are only allowed at top-level or directly inside blocks')
             return parse_var()
         elif peek().text == 'true':
-            consume('true')
-            return ast.Literal(value=True, location=peek().loc)
+            token = consume('true')
+            return ast.Literal(value=True, location=token.loc, type=Bool())
         elif peek().text == 'false':
-            consume('false')
-            return ast.Literal(value=False, location=peek().loc)
+            token = consume('false')
+            return ast.Literal(value=False, location=token.loc, type=Bool())
         elif peek().type == 'end':
             return ast.EmptyInput(location=peek().loc)
         else:
@@ -260,8 +272,44 @@ def parse(tokens: list[Token]) -> ast.Expression:
         consume('=')
         return ast.VariableDeclaration(ID=ID, expression=parse_expression(allow_var=False), var_type=var_type, location=ID.location)
 
-    result = parse_expression(allow_var=True) 
-    if peek().type != 'end':
-        raise Exception(f'{peek().loc}: expected the end but got token {peek().text} at {pos}')
-    
+    def parse_function_definition() -> ast.FunctionDefinition:
+        token = consume('fun')
+        name = parse_identifier()
+        consume('(')
+        
+        params: list[tuple[ast.Identifier, Type]] = []
+        while peek().text != ')':
+            param_name = parse_identifier()
+            consume(':')
+            param_type = parse_type()
+            params.append((param_name, param_type))
+            if peek().text == ',':
+                consume(',')
+        consume(')')
+        
+        consume(':')
+        return_type = parse_type()
+        
+        body = parse_block()
+        
+        return ast.FunctionDefinition(
+            name=name,
+            params=params,
+            return_type=return_type,
+            body=body,
+            location=token.loc
+        )
+
+    loc = tokens[0].loc if tokens else TokenLocation(-1, -1)
+    tokens.insert(0, Token(text='{', type='punctuation', loc=loc))
+    tokens.append(Token(text='}', type='punctuation', loc=loc))
+
+    result = parse_block()
+
+    if isinstance(result, ast.Block):
+        if len(result.expressions) == 0:
+            return ast.EmptyInput(location=TokenLocation(0, 0))
+        if len(result.expressions) == 1 and not result.has_semicolon:
+            return result.expressions[0]
+
     return result

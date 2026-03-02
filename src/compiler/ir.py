@@ -74,3 +74,19 @@ class CondJump(Instruction):
     then_label: Label
     else_label: Label
 
+@dataclass(frozen=True)
+class FunctionStart(Instruction):
+    """Start of func definition"""
+    name: str
+    params: list[IRVar]
+
+@dataclass(frozen=True)
+class FunctionEnd(Instruction):
+    """End of func definition"""
+    name: str
+
+@dataclass(frozen=True)
+class Return(Instruction):
+    """Returns a value from func"""
+    value: IRVar
+

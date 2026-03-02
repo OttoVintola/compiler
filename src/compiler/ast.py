@@ -86,3 +86,24 @@ class WhileStatement(Expression):
 @dataclass
 class EmptyInput(Expression):
     pass
+
+@dataclass
+class Break(Expression):
+    """Exits the innermost loop"""
+    pass
+
+@dataclass
+class Continue(Expression):
+    """Goes back to the beginning of the innermost loop"""
+    pass
+
+@dataclass
+class FunctionDefinition(Expression):
+    name: Identifier
+    params: list[tuple[Identifier, Type]]
+    return_type: Type
+    body: Expression
+
+@dataclass
+class Return(Expression):
+    value: Expression

@@ -103,7 +103,7 @@ def test_parser_basics() -> None:
     
     assert parse(tokenize('not not true')) == UnaryOperator(op='not',
                                                 right=UnaryOperator(op='not',
-                                                                    right=Literal(value=True, location=L),
+                                                                    right=Literal(value=True, location=L, type=Bool()),
                                                                     location=L),
                                                 location=L)
     
@@ -137,7 +137,7 @@ def test_parser_basics() -> None:
         expressions=[
             IfStatement(
                 the_if=Identifier(name='if', location=L),
-                first_expr=Literal(value=True, location=L),
+                first_expr=Literal(value=True, location=L, type=Bool()),
                 the_then=Identifier(name='then', location=L),
                 second_expr=Block(expressions=[Identifier(name='a', location=L)], has_semicolon=False, result_expression=Identifier(name='a', location=L), location=L),
                 the_else=None,
@@ -155,7 +155,7 @@ def test_parser_basics() -> None:
         expressions=[
             IfStatement(
                 the_if=Identifier(name='if', location=L),
-                first_expr=Literal(value=True, location=L),
+                first_expr=Literal(value=True, location=L, type=Bool()),
                 the_then=Identifier(name='then', location=L),
                 second_expr=Block(expressions=[Identifier(name='a', location=L)], has_semicolon=False, result_expression=Identifier(name='a', location=L), location=L),
                 the_else=None,
@@ -179,7 +179,7 @@ def test_parser_basics() -> None:
         expressions=[
             IfStatement(
                 the_if=Identifier(name='if', location=L),
-                first_expr=Literal(value=True, location=L),
+                first_expr=Literal(value=True, location=L, type=Bool()),
                 the_then=Identifier(name='then', location=L),
                 second_expr=Block(expressions=[Identifier(name='a', location=L)], has_semicolon=False, result_expression=Identifier(name='a', location=L), location=L),
                 the_else=None,
@@ -198,7 +198,7 @@ def test_parser_basics() -> None:
         expressions=[
             IfStatement(
                 the_if=Identifier(name='if', location=L),
-                first_expr=Literal(value=True, location=L),
+                first_expr=Literal(value=True, location=L, type=Bool()),
                 the_then=Identifier(name='then', location=L),
                 second_expr=Block(expressions=[Identifier(name='a', location=L)], has_semicolon=False, result_expression=Identifier(name='a', location=L), location=L),
                 the_else=Identifier(name='else', location=L),

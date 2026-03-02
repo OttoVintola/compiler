@@ -29,7 +29,7 @@ def tokenize(source_code: str) -> list[Token]:
         if whitespaces is not None:
             pos+=1
         
-        comment = re.compile("# [a-z]*")
+        comment = re.compile(r"(#|//)[^\n]*")
         comments = comment.match(source_code, pos)
         if comments is not None:
             length = comments.span()[1] - comments.span()[0]
