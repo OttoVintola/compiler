@@ -354,6 +354,9 @@ def generate_ir(
         ins.append(Call(location=L, fun=IRVar("print_bool"), args=[var_final_result], dest=new_var()))
 
     for func_def in _function_definitions:
+        root_symtab.add_local(func_def.name.name, IRVar(func_def.name.name))
+
+    for func_def in _function_definitions:
         func_symtab = SymTab[IRVar](mapping=root_symtab.mapping.copy())
         
         func_symtab.add_local(func_def.name.name, IRVar(func_def.name.name))

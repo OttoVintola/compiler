@@ -1,6 +1,7 @@
 import compiler.ast as ast
 from compiler.types import Int, Type, Bool, Unit, FunType
 from compiler.ast import *
+from dataclasses import field
 from typing import Generic, TypeVar
 
 T = TypeVar('T')
@@ -10,6 +11,7 @@ class SymTab(Generic[T]):
     """This is supposed to map variable names to types"""
     mapping: dict[str, T]
     current_return_type: Type | None = None
+    locals: set[str] = field(default_factory=set)
 
     def map(self, variable_name: str) -> T:
         return self.mapping[variable_name]
@@ -65,7 +67,7 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
         case ast.BinaryOp() if node.op == '=':
             t1 = typecheck_node(node.left, symtab)
             typecheck_node(node.right, symtab)
-            # For chained assignment (a = b = c), find the innermost assigned value's type.
+            # For chained assignment (a = b = c), find the innermost assigned value's type
             rhs = node.right
             while isinstance(rhs, ast.BinaryOp) and rhs.op == '=':
                 rhs = rhs.right
@@ -101,8 +103,9 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
             return result
         case ast.VariableDeclaration():
             tExpr = typecheck_node(node.expression, symtab)
-            if node.ID.name in symtab.mapping:
+            if node.ID.name in symtab.locals:
                 raise Exception(f'Variable {node.ID.name} already declared in this scope')
+            symtab.locals.add(node.ID.name)
             symtab.mapping[node.ID.name] = tExpr
             if node.var_type is not None and tExpr != node.var_type:
                 raise Exception(f'Variable declaration type mismatch: declared {node.var_type}, got {tExpr}')
@@ -117,13 +120,18 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
         case ast.FunctionCall():
             function_name: Identifier = node.function_name
             function_type: FunType = symtab.map(function_name.name)
-            function_type.params
+
+            if len(node.arguments) != len(function_type.params):
+                raise Exception(f'Function {function_name.name} expects {len(function_type.params)} arguments, got {len(node.arguments)}')
+
+                
             for i, (node_param, func_param) in enumerate(zip(node.arguments, function_type.params)):
                 # typecheck(node.arg) has to match function_type.params
                 param_type: Type = typecheck_node(node_param, symtab)
 
                 if param_type != func_param: raise Exception(f'Parameter {i} of function {function_name.name} expects {func_param}, got {param_type}')
 
+            node.type = function_type.return_type
             return function_type.return_type
         
         case ast.WhileStatement():
@@ -138,6 +146,14 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
         case ast.Block():
             # Create a new scope for the block
             block_symtab = SymTab(mapping=symtab.mapping.copy(), current_return_type=symtab.current_return_type)
+
+            for expr in node.expressions:
+                if isinstance(expr, ast.FunctionDefinition):
+                    param_types = [param_type for _, param_type in expr.params]
+                    func_type = FunType(params=param_types, return_type=expr.return_type)
+                    block_symtab.mapping[expr.name.name] = func_type
+
+
             for expr in node.expressions:
                 typecheck_node(expr, block_symtab)
                 
@@ -157,11 +173,13 @@ def typecheck_node(node: ast.Expression, symtab: SymTab) -> Type:
             return Unit()
         
         case ast.FunctionDefinition():
-            param_types = [param_type for _, param_type in node.params]
+            param_types = [param_type for param_id, param_type in node.params]
             func_type = FunType(params=param_types, return_type=node.return_type)
-            
-            if node.name.name in symtab.mapping:
-                raise Exception(f'Function {node.name.name} already declared in this scope')
+
+            # check that there are no duplicate parameter names
+            if len(set(param.name for param, param_id in node.params)) != len(node.params):
+                raise Exception("Function params can not have duplicate names")
+
             symtab.mapping[node.name.name] = func_type
             
             func_symtab = SymTab(mapping=symtab.mapping.copy(), current_return_type=node.return_type)

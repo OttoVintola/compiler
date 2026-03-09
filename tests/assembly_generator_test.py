@@ -21,9 +21,9 @@ def test_assembly_generator() -> None:
 factorial(5)""")
     expressions = parse(tokens)
     typecheck(expressions)
-    print(expressions)
+    # print(expressions)
     ir = generate_ir(reserved_names=reserved_names, root_expr=expressions)
-    for irn in ir:
-        print(irn)
-    print(generate_assembly(ir))
+    # for irn in ir:
+    #     print(irn)
+    # print(generate_assembly(ir))
 

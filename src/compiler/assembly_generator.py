@@ -33,7 +33,7 @@ class Locals:
 
 
 def get_all_ir_variables_in_range(instructions: list[ir.Instruction], start: int, end: int) -> list[ir.IRVar]:
-    """Get all IR variables from instructions[start:end]"""
+    """Get all IR variables from instructions within some range"""
     result_list: list[ir.IRVar] = []
     result_set: set[ir.IRVar] = set()
 
@@ -201,7 +201,7 @@ def generate_assembly(instructions: list[ir.Instruction]) -> str:
                     emit(f'call {insn.fun.name}')
                     emit(f'movq %rax, {current_locals.get_ref(insn.dest)}')
                 else:
-                    # use pointer call. I don't know why but this seems garbage but hey it works
+                    # use pointer call
                     for j, arg in enumerate(insn.args):
                         if j < len(arg_regs):
                             emit(f'movq {current_locals.get_ref(arg)}, {arg_regs[j]}')
@@ -212,7 +212,6 @@ def generate_assembly(instructions: list[ir.Instruction]) -> str:
                 
         
     if not we_done: 
-        # even without functions, need to return... 
         # i dont know why but I get a crash without this
         # maybe its about the caller's stack frame
         emit(f'movq %rbp, %rsp')
